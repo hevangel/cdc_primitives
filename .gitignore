@@ -1,0 +1,13 @@
+# Verification work products
+/work/
+obj_dir/
+
+# Waveforms and logs
+*.vcd
+*.fst
+*.log
+
+# SymbiYosys work dirs
+*_bmc/
+*_prove/
+*_cover/

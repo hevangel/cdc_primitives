@@ -1,0 +1,6 @@
+# Keep Unix line endings for sources and scripts so they run in the Linux
+# verification container regardless of the checkout platform.
+*.sh    text eol=lf
+*.sv    text eol=lf
+*.sby   text eol=lf
+*.md    text eol=lf
