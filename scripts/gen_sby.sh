@@ -38,7 +38,9 @@ emit() {
         ftop=$(echo "$top" | tr '[:lower:]' '[:upper:]')_FTOP
         echo '[script]'
         printf 'read -formal -D FORMAL -D %s' "$ftop"
-        for f in $files; do printf ' %s' "$f"; done
+        # SBY copies [files] flat into src/ keyed by basename, so `read` names
+        # each file by basename even when it lives in an rtl/ subdirectory.
+        for f in $files; do printf ' %s' "$(basename "$f")"; done
         echo
         echo "prep -top $top"
         echo 'memory_map'
@@ -64,5 +66,10 @@ emit cdc_pingpong            "cdc_pingpong.sv cdc_bus_mcp.sv cdc_sync_toggle.sv"
 emit cdc_mailbox             "cdc_mailbox.sv cdc_bus_handshake.sv"
 emit rst_sync                "rst_sync.sv"
 emit cdc_clock_stop_ctrl     "cdc_clock_stop_ctrl.sv"
+
+# Protocol clock-converter bridges (built on the primitives above).
+emit axis_cdc                "bridges/axis_cdc.sv cdc_async_fifo.sv"
+emit apb_cdc                 "bridges/apb_cdc.sv cdc_bus_handshake.sv"
+emit axil_cdc                "bridges/axil_cdc.sv cdc_async_fifo.sv"
 
 echo 'all .sby files generated'

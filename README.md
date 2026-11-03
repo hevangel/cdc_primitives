@@ -36,9 +36,26 @@ collapse onto one foundational module each.
 
 `cdc_pkg.sv` provides shared Gray/binary helper functions for testbenches.
 
-Protocol bridges (AXI/APB/AHB clock converters, E1–E8) are intentionally **out
-of scope**: they are protocol wrappers built *on top of* these primitives, not
-primitives themselves.
+## Protocol clock-converter bridges
+
+Built *on top of* the primitives (in `rtl/bridges/`), these cross standard bus
+protocols between clock domains. They are wrappers, not primitives — each one
+is just the right primitive(s) wired to a protocol's channels.
+
+| Bridge | Covers | Purpose | Built on |
+|--------|--------|---------|----------|
+| `axis_cdc` | E3 | AXI4-Stream clock converter | one `cdc_async_fifo` |
+| `apb_cdc` | E4 | APB clock bridge | two `cdc_bus_handshake` (req + response) |
+| `axil_cdc` | E2 | AXI4-Lite clock converter | five `cdc_async_fifo` (one per AW/W/B/AR/R channel) |
+
+- `axis_cdc` packs `TDATA`/`TKEEP`/`TLAST`/`TID` into one FIFO word; `TVALID`/
+  `TREADY` drive push/pop so no beat is lost or duplicated.
+- `apb_cdc` maps APB's single-outstanding SETUP/ACCESS model onto a request
+  handshake (PADDR/PWRITE/PWDATA/PSTRB) and a response handshake
+  (PRDATA/PSLVERR); PREADY holds the access until the response returns.
+- `axil_cdc` gives each of the five AXI4-Lite channels its own async FIFO —
+  the standard, deadlock-free clock conversion: channels stay independent and
+  each keeps its own ready/valid backpressure.
 
 ## Selecting a primitive
 
@@ -56,6 +73,9 @@ primitives themselves.
 | Message / command | `cdc_mailbox` |
 | Reset release | `rst_sync` |
 | Clock stop / isolation | `cdc_clock_stop_ctrl` |
+| AXI-Stream across clocks | `axis_cdc` |
+| APB across clocks | `apb_cdc` |
+| AXI4-Lite across clocks | `axil_cdc` |
 
 A CDC library cannot make an arbitrary crossing safe on its own: the designer
 still has to classify the signal (level, event, coherent word, transaction,
@@ -72,11 +92,13 @@ instantiating.
 ## Repository layout
 
 ```
-rtl/        synthesisable SystemVerilog, one module per file
-formal/     generated SymbiYosys .sby jobs (one per module)
-tb/         two-clock self-checking simulation testbenches
-scripts/    run_lint.sh, run_formal.sh, run_sim.sh, run_synth.sh, run_all.sh, gen_sby.sh
-doc/        design notes
+rtl/            synthesisable SystemVerilog primitives, one module per file
+rtl/bridges/    protocol clock-converter bridges (axis/apb/axil)
+formal/         generated SymbiYosys .sby jobs (one per module + bridge)
+tb/             two-clock self-checking simulation testbenches
+constraints/    one SDC timing-exception template per module + bridge
+scripts/        run_lint.sh, run_formal.sh, run_sim.sh, run_synth.sh, run_all.sh, gen_sby.sh
+doc/            design notes
 ```
 
 ## Verification
@@ -97,13 +119,14 @@ What each stage checks:
   module's inline `` `ifdef FORMAL `` SVA. Data-integrity primitives use an
   `anyconst` payload oracle; environment assumptions are guarded by a
   per-module `*_FTOP` define so they never leak into a parent that instantiates
-  the module. **45/45 formal checks pass.**
+  the module. **54/54 formal checks pass** (18 modules × bmc/prove/cover).
 - **Simulation** — each module has a two-asynchronous-clock self-checking
-  testbench run under **both** Verilator and xezim, asserting the primitive's
-  guarantee (lossless/in-order/coherent/no-overflow/…) and printing a
-  `CDC <module> PASS:` marker. **30/30 runs pass.**
-- **Synthesis** — Yosys `synth` on every module confirms it is synthesisable
-  (no initial blocks, delays, or other non-synthesisable constructs).
+  testbench run under **both** Verilator and xezim, asserting the guarantee
+  (lossless/in-order/coherent/no-overflow/…) and printing a
+  `CDC <module> PASS:` marker. **36/36 runs pass** (18 modules × 2 simulators).
+- **Synthesis** — Yosys `synth` on every module and bridge confirms it is
+  synthesisable (no initial blocks, delays, or other non-synthesisable
+  constructs).
 
 ### Verified guarantees (highlights)
 
@@ -118,16 +141,27 @@ What each stage checks:
 - `cdc_clock_stop_ctrl`: the clock is never gated off without a confirmed
   grant, and outputs are isolated whenever the clock is off.
 
-## Physical / STA notes
+## Physical / STA constraints
 
-These RTL primitives still require correct constraints at implementation:
+These RTL primitives still require correct timing constraints at
+implementation. `constraints/` holds a **copy-and-fill SDC template for every
+primitive and bridge** (`constraints/<module>.sdc`,
+`constraints/bridges/<bridge>.sdc`); see
+[`constraints/README.md`](constraints/README.md) for the exception types and
+the general rules. Each template:
 
-- Tag synchroniser flops with `ASYNC_REG` (already annotated in RTL) so the
-  tool places them together for maximum MTBF.
-- Constrain crossing paths with the appropriate SDC exception
-  (`set_false_path` for pure synchronisers, `set_max_delay -datapath_only` /
-  multicycle for MCP and Gray buses). A clean structural CDC report is **not**
-  a substitute for correct constraints or for functional/protocol verification.
+- false-paths pure single-bit level/control crossings (`set_false_path`),
+- bounds Gray buses, MCP/quasi-static data and FIFO memory reads with
+  `set_max_delay -datapath_only` so the captured word stays coherent,
+- false-paths asynchronous reset pins, and
+- notes the top-level `set_clock_groups -asynchronous` the design must declare.
+
+Signal names in the templates match the RTL (`sync_q`, `gray_q`, `data_hold`,
+`wgray`/`rgray`, `mem`, …) so the register filters resolve against the netlist.
+Synchroniser flops carry `ASYNC_REG` in the RTL for placement/MTBF.
+
+A clean structural CDC report is **not** a substitute for correct constraints
+or for functional/protocol verification.
 
 ## License
 
