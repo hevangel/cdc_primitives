@@ -3,4 +3,5 @@
 *.sh    text eol=lf
 *.sv    text eol=lf
 *.sby   text eol=lf
+*.sdc   text eol=lf
 *.md    text eol=lf
